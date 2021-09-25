@@ -1,0 +1,105 @@
+#!/usr/bin/perl
+
+sub check_headers
+{
+    my($header);
+
+    $/ = '';                    # Read in paragraph mode
+
+    $header = <STDIN>;
+    $header =~ s/\n\s+/ /g;     # Join continuation lines
+
+#    $* = 1;                     # Multi line matching within a string
+
+    exit(0) if ($header =~ /^Precedence:\s+(bulk|junk)/im);
+    exit(0) if ($header =~ /^From.*-DAEMON\@/im);
+    exit(0) if ($header =~ /^From.*-REQUEST\@/im);
+    exit(0) if ($header =~ /^bounce\@/im);
+    exit(0) if ($header =~ /^failure notice\@/im);
+    exit(0) if ($header =~ /^Mailing-List:/im);
+
+}
+
+sub check_lastdate
+{
+    my($file) = @_;
+
+    dbmopen(%DBM, "$home" . "/$file", 0644);
+ 
+    $lastpurge = unpack("L", $DBM{"lastpurge"});
+
+    $now = time;
+
+    if ($lastpurge == 0) {
+      $DBM{"lastpurge"} = pack("L", $now);
+    }
+
+    if (($now - $lastpurge) > $weektimeout) {
+      foreach $key (sort keys %DBM)
+      {
+        $then = unpack("L", $DBM{"$key"});
+        if (($now - $then) > $weektimeout) {
+	  delete($DBM{$key});
+        }
+      }
+      $DBM{"lastpurge"} = pack("L", $now);
+    }
+
+    $now = time;
+    $then = unpack("L", $DBM{"$sender"});
+
+    exit(0) if (($now - $then) <= $daytimeout);
+
+    $DBM{$sender} = pack("L", $now);
+    close(%DBM);
+}
+
+
+
+$SENDER = @ARGV[0];
+$USER = @ARGV[1];
+$SUBJECT = @ARGV[2];
+
+if ($SUBJECT eq "") {
+  $SUBJECT = "I am away";
+}
+
+$home = $ENV{'HOME'};
+$ext = $ENV{'EXT'};
+
+open ($fd, "$home"."/$ext"."/.vacation");
+read($fd, $vacationmessage, 2000);
+close($fd);
+$command = "echo \"From: $ext\nTo: $SENDER\nSubject: $SUBJECT\nPrecedence: junk\n\n$vacationmessage\n\" | /var/qmail/bin/qmail-inject";
+
+$useraddr = "$ext\@$USER";
+
+if ($SENDER =~ /$useraddr/i) {
+## prevent a loop
+} else {
+## check a few things and then if okay send
+exit(0) unless $ENV{'DTLINE'};
+
+$rpline = $ENV{'RPLINE'};
+$ufline = $ENV{'UFLINE'};
+exit(0) if ($ufline =~ /-REQUEST\@/i);
+exit(0) if ($rpline =~ /-REQUEST\@/i);
+
+$host = lc($ENV{'HOST'});
+$sender = lc($ENV{'SENDER'});
+$user = lc($ENV{'USER'});
+
+$timeout = 60 * 60 * 24 * 7 unless $timeout;
+
+chdir;
+&check_headers();
+$daytimeout = 60 * 60 * 24;
+$weektimeout = 60 * 60 * 24 * 7;
+
+&check_lastdate("$ext/.vacationdbm");
+
+`$command`;
+}
+
+exit(0);
+

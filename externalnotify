@@ -1,0 +1,88 @@
+#!/usr/bin/perl
+
+sub check_headers
+{
+    my($header);
+
+    $/ = '';                    # Read in paragraph mode
+
+    $header = <STDIN>;
+    $header =~ s/\n\s+/ /g;     # Join continuation lines
+
+#    $* = 1;                     # Multi line matching within a string
+
+    exit(0) if ($header =~ /^Precedence:\s+(bulk|junk)/im);
+    exit(0) if ($header =~ /^From.*-DAEMON\@/im);
+    exit(0) if ($header =~ /^From.*-REQUEST\@/im);
+    exit(0) if ($header =~ /^bounce\@/im);
+    exit(0) if ($header =~ /^failure notice\@/im);
+    exit(0) if ($header =~ /^Mailing-List:/im);
+
+}
+
+sub check_lastdate
+{
+    my($file) = @_;
+
+    dbmopen(%DBM, "$home" . "/$ext" . "/$file", 0644);
+
+    $lastpurge = unpack("L", $DBM{"lastpurge"});
+
+    $now = time;
+
+    if ($lastpurge == 0) {
+      $DBM{"lastpurge"} = pack("L", $now);
+    }
+
+    if (($now - $lastpurge) > $daytimeout) {
+      foreach $key (sort keys %DBM)
+      {
+        $then = unpack("L", $DBM{"$key"});
+        if (($now - $then) > $daytimeout) {
+          delete($DBM{$key});
+        }
+      }
+      $DBM{"lastpurge"} = pack("L", $now);
+    }
+
+    $now = time;
+    $then = unpack("L", $DBM{"$sender"});
+
+    exit(0) if (($now - $then) <= $halfhourtimeout);
+
+    $DBM{$sender} = pack("L", $now);
+    close(%DBM);
+}
+
+$SENDER = @ARGV[0];
+$USER = @ARGV[1];
+
+$home = $ENV{'HOME'};
+$ext = $ENV{'EXT'};
+$host = lc($ENV{'HOST'});
+$sender = lc($ENV{'SENDER'});
+$user = lc($ENV{'USER'});
+
+open ($fd, "$home"."/$ext"."/.notify");
+read($fd, $notifyaddress, 1000);
+close($fd);
+$notifyaddress =~ s/ //;
+$notifyaddress =~ s/\n//;
+$command = "echo \"From: $ext\@$user\nTo: $notifyaddress\nSubject: new message from $SENDER at keptprivate.com\nPrecedence: junk\n\nYou have a new message from $SENDER at http://www.keptprivate.com\n\" | /var/qmail/bin/qmail-inject";
+
+$useraddr = "$ext\@$USER";
+
+if ($notifyaddress =~ /$useraddr/i) {
+## prevent a loop
+} else {
+&check_headers();  
+$halfhourtimeout = 60 * 30;
+$daytimeout = 60 * 60 * 24;
+
+&check_lastdate(".notifydbm");
+
+`$command`;
+}
+
+exit(0);
+

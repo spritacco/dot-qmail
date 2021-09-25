@@ -1,0 +1,117 @@
+#!/usr/bin/perl
+
+my $SUBJECT;
+
+sub check_headers
+{
+    my($header);
+
+    $/ = '';                    # Read in paragraph mode
+
+    $header = <STDIN>;
+    $header =~ s/\n\s+/ /g;     # Join continuation lines
+
+#    $* = 1;                     # Multi line matching within a string
+
+    exit(0) if ($header =~ /^Precedence:\s+(bulk|junk)/im);
+    exit(0) if ($header =~ /^From.*-DAEMON\@/im);
+    exit(0) if ($header =~ /^From.*-REQUEST\@/im);
+    exit(0) if ($header =~ /^bounce\@/im);
+    exit(0) if ($header =~ /^failure notice\@/im);
+    exit(0) if ($header =~ /^Mailing-List:/im);
+    $header =~ /^Subject:\s(.*)/im;
+    $SUBJECT = $1;
+
+}
+
+sub check_lastdate
+{
+    my($file) = @_;
+
+    dbmopen(%DBM, "$home" . "/$ext" . "/$file", 0644);
+
+    $lastpurge = unpack("L", $DBM{"lastpurge"});
+
+    $now = time;
+
+    if ($lastpurge == 0) {
+      $DBM{"lastpurge"} = pack("L", $now);
+    }
+
+    if (($now - $lastpurge) > $daytimeout) {
+      foreach $key (sort keys %DBM)
+      {
+        $then = unpack("L", $DBM{"$key"});
+        if (($now - $then) > $daytimeout) {
+          delete($DBM{$key});
+        }
+      }
+      $DBM{"lastpurge"} = pack("L", $now);
+    }
+
+    $now = time;
+    $then = unpack("L", $DBM{"$sender"});
+
+    exit(0) if (($now - $then) <= $halfhourtimeout);
+
+    $DBM{$sender} = pack("L", $now);
+    close(%DBM);
+}
+
+$SENDER = @ARGV[0];
+$USER = @ARGV[1];
+$KEYWORD = @ARGV[2];
+$ARSUBJECT = @ARGV[3];
+
+if ($ARSUBJECT eq "") {
+  $ARSUBJECT = "autoresponse";
+}
+
+$home = $ENV{'HOME'};
+$ext = $ENV{'EXT'};
+
+open ($fd, "$home"."/$ext"."/.autoresponse");
+read($fd, $message, 8000);
+close($fd);
+$useraddr = "$ext\@$USER";
+$command = "echo \"From: $useraddr\nTo: $SENDER\nSubject: $ARSUBJECT\nPrecedence: junk\n\n$message\n\" | /var/qmail/bin/qmail-inject";
+
+
+if ($SENDER =~ /$useraddr/i) {
+## prevent a loop
+} else {
+## check a few things and then if okay send
+exit(0) unless $ENV{'DTLINE'};
+
+$rpline = $ENV{'RPLINE'};
+$ufline = $ENV{'UFLINE'};
+exit(0) if ($ufline =~ /-REQUEST\@/i);
+exit(0) if ($rpline =~ /-REQUEST\@/i);
+
+$home = $ENV{'HOME'};
+$host = lc($ENV{'HOST'});
+$sender = lc($ENV{'SENDER'});
+$user = lc($ENV{'USER'});
+$keyword = lc($KEYWORD);
+
+$timeout = 60 * 60 * 24 * 7 unless $timeout;
+$halfhourtimeout = 60 * 30;
+$daytimeout = 60 * 60 * 24;
+
+
+chdir;
+&check_headers();
+
+$subject = lc($SUBJECT);
+
+if ( index($subject, $keyword) >= 0 ) {
+
+&check_lastdate(".autoresponderdbm");
+
+`$command`;
+}
+
+}
+
+exit(0);
+
