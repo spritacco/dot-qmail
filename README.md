@@ -5,10 +5,10 @@ These utilites are used by writing files in the directory for each account.
 
 A .qmail file using all 3 might look like this:
 
-./Maildir/
-|externalnotify $SENDER $USER
-|vacation $SENDER $USER "I'm on vacation"
-|autoresponder $SENDER $USER "list" "the list"
+./Maildir/<br />
+|externalnotify $SENDER $USER<br />
+|vacation $SENDER $USER "I'm on vacation"<br />
+|autoresponder $SENDER $USER "list" "the list"<br />
 
 externalnotify: looks for a .notify file (same directory) containing the email address where the notification will be sent
 
